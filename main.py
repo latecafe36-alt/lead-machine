@@ -1,116 +1,121 @@
 import requests
 import csv
 import time
-from datetime import datetime
-from config import SERPAPI_KEY, MIN_SCORE
 
-queries = [
-    'site:linkedin.com/posts "raising funds" startup',
-    'site:linkedin.com/posts "looking for investors" startup',
-    'site:linkedin.com/posts "seed round" startup'
+API_KEY = "ad58d596173b2c3e38df2090c2e4f6b3a1c954d1acbdc841727d9d7d15e1adfb"  # ← mets ta clé ici
+
+# 🌍 VILLES CIBLÉES
+cities = [
+    # 🇨🇭 Suisse
+    "Zurich", "Geneva", "Lausanne", "Basel", "Bern", "Zug",
+    "Lucerne", "St Gallen", "Winterthur",
+
+    # 🇧🇪 Belgique
+    "Brussels", "Antwerp", "Ghent", "Liege",
+    "Charleroi", "Namur", "Leuven"
 ]
 
-def extract_profile(url):
-    try:
-        return "https://www.linkedin.com/in/" + url.split("/posts/")[1].split("_")[0]
-    except:
-        return ""
+# 🔎 QUERIES ULTRA CIBLÉES (levée de fonds)
+base_queries = [
+    '"raising funds" startup',
+    '"looking for investors" startup',
+    '"seed round" startup',
+    '"pre-seed startup"',
+    '"series A startup"',
+    '"raising capital startup"',
+    '"we are raising startup"',
+    '"startup fundraising"',
+    '"looking for VC startup"',
+    '"angel investors startup"'
+]
 
+# 🧠 SCORING LEAD
 def score(text):
     t = text.lower()
     s = 0
-    if "raising" in t: s += 3
-    if "investors" in t: s += 4
-    if "seed" in t or "series a" in t: s += 3
+
+    keywords = {
+        "raising": 3,
+        "funding": 3,
+        "investors": 4,
+        "seed": 3,
+        "series a": 4,
+        "pre-seed": 3,
+        "capital": 2,
+        "vc": 3,
+        "angel": 3
+    }
+
+    for k, v in keywords.items():
+        if k in t:
+            s += v
+
     return s
 
-def generate_msg(snippet):
-    return f"""Hey,
 
-I saw your post:
-"{snippet[:100]}..."
+# 📊 STOCKAGE
+leads = []
+seen_links = set()
 
-Looks like you're raising.
+print("🚀 START SCRAPING...\n")
 
-Open to a quick chat?"""
+# 🔁 LOOP QUERIES + VILLES
+for city in cities:
+    for base in base_queries:
 
-def load_existing():
-    try:
-        with open("db.csv", "r", encoding="utf-8") as f:
-            return set(row["profile"] for row in csv.DictReader(f))
-    except:
-        return set()
+        query = f'site:linkedin.com/posts {base} "{city}"'
+        print(f"🔎 {query}")
 
-def save(leads):
-    file_exists = False
-    try:
-        open("db.csv")
-        file_exists = True
-    except:
-        pass
+        # 🔁 MULTI-PAGES (100 résultats)
+        for start in range(0, 100, 10):
 
-    with open("db.csv", "a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["profile","post","score","message","date"])
-        if not file_exists:
-            writer.writeheader()
-
-        for l in leads:
-            writer.writerow(l)
-
-def run():
-    existing = load_existing()
-    new_leads = []
-
-    print("🚀 RUN START")
-
-    for q in queries:
-        print("🔎", q)
-
-        for start in range(0, 30, 10):
             params = {
-                "q": q,
-                "api_key": SERPAPI_KEY,
-                "start": start
+                "engine": "google",
+                "q": query,
+                "api_key": API_KEY,
+                "start": start,
+                "num": 10,
+                "tbs": "qdr:d"  # 🔥 derniers 24h
             }
 
-            res = requests.get("https://serpapi.com/search", params=params).json()
+            try:
+                response = requests.get("https://serpapi.com/search", params=params)
+                data = response.json()
 
-            for r in res.get("organic_results", []):
-                link = r.get("link", "")
-                snippet = r.get("snippet", "")
+                results = data.get("organic_results", [])
 
-                if "linkedin.com/posts" not in link:
-                    continue
+                print(f"👉 {len(results)} résultats (page {start//10 + 1})")
 
-                profile = extract_profile(link)
+                for r in results:
+                    link = r.get("link", "")
+                    title = r.get("title", "")
+                    snippet = r.get("snippet", "")
 
-                if not profile or profile in existing:
-                    continue
+                    text = title + " " + snippet
+                    s = score(text)
 
-                s = score(snippet)
+                    # 🎯 filtre qualité
+                    if link not in seen_links and s >= 5:
+                        seen_links.add(link)
 
-                if s < MIN_SCORE:
-                    continue
+                        leads.append({
+                            "title": title,
+                            "link": link,
+                            "snippet": snippet,
+                            "score": s,
+                            "city": city
+                        })
 
-                lead = {
-                    "profile": profile,
-                    "post": link,
-                    "score": s,
-                    "message": generate_msg(snippet),
-                    "date": datetime.today().strftime('%Y-%m-%d')
-                }
+            except Exception as e:
+                print("❌ erreur :", e)
 
-                new_leads.append(lead)
-                existing.add(profile)
+            time.sleep(1)  # anti-ban
 
-            time.sleep(1)
+# 💾 SAVE CSV
+with open("leads.csv", "w", newline="", encoding="utf-8") as f:
+    writer = csv.DictWriter(f, fieldnames=["title", "link", "snippet", "score", "city"])
+    writer.writeheader()
+    writer.writerows(leads)
 
-    save(new_leads)
-
-    print(f"🔥 {len(new_leads)} nouveaux leads ajoutés")
-
-if __name__ == "__main__":
-    while True:
-        run()
-        print("⏸️ pause 3h...")
-        time.sleep(10800)
+print(f"\n🔥 {len(leads)} LEADS TROUVÉS")
+print("✅ Sauvegardé dans leads.csv")
