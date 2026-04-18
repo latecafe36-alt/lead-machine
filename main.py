@@ -10,13 +10,13 @@ SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 
 MAX_THREADS = 5
 
-# 🔥 NOUVELLES QUERIES (PAYS)
+# 🔥 QUERIES CORRIGÉES (SANS PAYS)
 queries = [
-    'site:linkedin.com/in ("Founder" OR "CEO") "startup" ("Switzerland" OR "Germany" OR "Belgium" OR "Portugal")',
-    'site:linkedin.com/in "AI startup" ("Switzerland" OR "Germany" OR "Belgium" OR "Portugal")',
-    'site:linkedin.com/in "SaaS founder" ("Switzerland" OR "Germany" OR "Belgium" OR "Portugal")',
-    'site:linkedin.com/in "machine learning" "startup" ("Switzerland" OR "Germany" OR "Belgium" OR "Portugal")',
-    'site:linkedin.com/in ("startup" OR "entrepreneur") ("Switzerland" OR "Germany" OR "Belgium" OR "Portugal")',
+    'site:linkedin.com/in "founder startup"',
+    'site:linkedin.com/in "CEO startup"',
+    'site:linkedin.com/in "AI startup"',
+    'site:linkedin.com/in "SaaS founder"',
+    'site:linkedin.com/in "machine learning startup"',
 ]
 
 # -------- SAFE REQUEST --------
@@ -24,7 +24,8 @@ def safe_request(url, params, retries=3):
     for _ in range(retries):
         try:
             return requests.get(url, params=params, timeout=10).json()
-        except:
+        except Exception as e:
+            print(f"⚠️ Erreur requête: {e}")
             time.sleep(random.randint(1, 3))
     return {}
 
@@ -37,11 +38,17 @@ def score_lead(snippet, name):
         if k in text:
             score += 1
 
-    for k in ["founder", "ceo"]:
-        if k in name.lower():
-            score += 1
+    if "founder" in name.lower() or "ceo" in name.lower():
+        score += 1
 
     return score
+
+# -------- FILTRE PAYS --------
+def is_target_country(snippet):
+    text = (snippet or "").lower()
+    return any(c in text for c in [
+        "switzerland", "germany", "belgium", "portugal"
+    ])
 
 # -------- PROCESS LEAD --------
 def process_lead(r):
@@ -49,9 +56,15 @@ def process_lead(r):
     name = r.get("title", "")
     snippet = r.get("snippet", "")
 
+    if not link or "linkedin.com/in" not in link:
+        return None
+
+    # 🔥 filtre pays ici (PAS dans Google)
+    if not is_target_country(snippet):
+        return None
+
     score = score_lead(snippet, name)
 
-    # 🔥 seuil plus bas pour volume
     if score < 1:
         return None
 
@@ -71,7 +84,7 @@ def scrape():
 
         params = {
             "q": query,
-            "num": 100,  # 🔥 plus de volume
+            "num": 100,
             "api_key": SERPAPI_KEY
         }
 
