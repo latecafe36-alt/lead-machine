@@ -2,7 +2,7 @@ import requests
 import csv
 import time
 
-API_KEY = "ad58d596173b2c3e38df2090c2e4f6b3a1c954d1acbdc841727d9d7d15e1adfb"  # ← mets ta clé ici
+API_KEY = ""  # ← mets ta clé ici
 
 # 🌍 VILLES CIBLÉES
 cities = [
