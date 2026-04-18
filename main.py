@@ -1,7 +1,6 @@
 import os
 import requests
 import psycopg2
-from urllib.parse import urlparse
 
 # ========================
 # CONFIG
@@ -24,8 +23,11 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS leads (
             id SERIAL PRIMARY KEY,
-            name TEXT,
+            title TEXT,
             link TEXT UNIQUE,
+            snippet TEXT,
+            city TEXT,
+            score INTEGER,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -33,6 +35,27 @@ def init_db():
     conn.commit()
     cur.close()
     conn.close()
+
+# ========================
+# SCORE
+# ========================
+
+def compute_score(title="", snippet=""):
+    text = (title + " " + snippet).lower()
+    score = 0
+
+    if "ceo" in text:
+        score += 5
+    if "founder" in text:
+        score += 5
+    if "saas" in text:
+        score += 3
+    if "startup" in text:
+        score += 3
+    if "fund" in text:
+        score += 5
+
+    return score
 
 # ========================
 # GOOGLE SEARCH VIA SERPAPI
@@ -53,13 +76,11 @@ def search_google(query):
         res = requests.get(url, params=params)
         data = res.json()
 
-        # DEBUG IMPORTANT
         if "error" in data:
             print("❌ SERPAPI ERROR:", data["error"])
             return []
 
         results = data.get("organic_results", [])
-
         print(f"➡️ {len(results)} résultats bruts")
 
     except Exception as e:
@@ -71,11 +92,17 @@ def search_google(query):
     for r in results:
         link = r.get("link", "")
         title = r.get("title", "")
+        snippet = r.get("snippet", "")
 
         if "linkedin.com/in/" in link:
+            score = compute_score(title, snippet)
+
             leads.append({
-                "name": title,
-                "link": link
+                "title": title,
+                "link": link,
+                "snippet": snippet,
+                "city": None,
+                "score": score
             })
 
     print(f"🔥 {len(leads)} leads LinkedIn trouvés")
@@ -96,11 +123,23 @@ def save_leads(leads):
     for lead in leads:
         try:
             cur.execute(
-                "INSERT INTO leads (name, link) VALUES (%s, %s) ON CONFLICT (link) DO NOTHING",
-                (lead["name"], lead["link"])
+                """
+                INSERT INTO leads (title, link, snippet, city, score)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (link) DO NOTHING
+                """,
+                (
+                    lead["title"],
+                    lead["link"],
+                    lead["snippet"],
+                    lead["city"],
+                    lead["score"]
+                )
             )
+            print("✅ Inserted:", lead["link"])
+
         except Exception as e:
-            print("DB error:", e)
+            print("❌ DB error:", e)
 
     conn.commit()
     cur.close()
@@ -138,7 +177,6 @@ def run_scraper():
         "Kuwait"
     ]
 
-    # Génération des requêtes
     for country in countries:
         for keyword in keywords:
             q = f'site:linkedin.com/in "{keyword}" "{country}"'
