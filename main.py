@@ -1,103 +1,83 @@
 import requests
-import pandas as pd
-from datetime import datetime
-import os
 import time
-import random
+import csv
 
-SERPAPI_KEY = os.getenv("SERPAPI_KEY")
+API_KEY = "TA_CLE_SERPAPI_ICI"
 
-# 🔥 QUERIES QUI DONNENT DES RÉSULTATS
-queries = [
-    "AI startup hiring",
-    "SaaS startup hiring",
-    "machine learning startup hiring",
-    "tech startup hiring Europe",
-    "startup hiring engineer"
+QUERIES = [
+    'site:linkedin.com/in "founder startup"',
+    'site:linkedin.com/in "CEO startup"',
+    'site:linkedin.com/in "co-founder startup"',
+    'site:linkedin.com/in "entrepreneur startup"',
+    'site:linkedin.com/in "startup CEO"',
 ]
 
-# -------- SAFE REQUEST --------
-def safe_request(params, retries=3):
-    for _ in range(retries):
-        try:
-            res = requests.get("https://serpapi.com/search", params=params, timeout=15)
-            return res.json()
-        except Exception as e:
-            print("⚠️ Request error:", e)
-            time.sleep(random.randint(1, 3))
-    return {}
+def search_google(query):
+    url = "https://serpapi.com/search"
+    
+    params = {
+        "q": query,
+        "api_key": API_KEY,
+        "engine": "google",
+        "num": 20
+    }
 
-# -------- SCRAPE JOBS --------
-def scrape_jobs():
+    response = requests.get(url, params=params)
+    data = response.json()
+
     results = []
 
-    for query in queries:
-        print(f"\n🔎 Query: {query}")
+    if "organic_results" in data:
+        for result in data["organic_results"]:
+            link = result.get("link", "")
+            title = result.get("title", "")
+            snippet = result.get("snippet", "")
 
-        params = {
-            "engine": "google_jobs",
-            "q": query,
-            "api_key": SERPAPI_KEY
-        }
+            if "linkedin.com/in/" in link:
+                results.append({
+                    "name": title,
+                    "link": link,
+                    "bio": snippet
+                })
 
-        data = safe_request(params)
+    return results
 
-        jobs = data.get("jobs_results", [])
 
-        print(f"👉 {len(jobs)} jobs trouvés")
+def main():
+    all_leads = []
 
-        for job in jobs:
-            company = job.get("company_name", "")
-            title = job.get("title", "")
-            location = job.get("location", "")
-            via = job.get("via", "")
+    print("🚀 Scraping lancé...\n")
 
-            if not company:
-                continue
+    for query in QUERIES:
+        print(f"🔎 Query: {query}")
+        leads = search_google(query)
 
-            print(f"🏢 {company} | {title}")
+        print(f"👉 {len(leads)} résultats trouvés\n")
 
-            results.append({
-                "company": company,
-                "job_title": title,
-                "location": location,
-                "source": via,
-                "date": datetime.today().strftime('%Y-%m-%d')
-            })
+        all_leads.extend(leads)
+        time.sleep(2)
 
-    df = pd.DataFrame(results)
+    # SUPPRIMER DOUBLONS
+    unique = {lead["link"]: lead for lead in all_leads}
+    leads = list(unique.values())
 
-    if not df.empty:
-        df = df.drop_duplicates(subset=["company"])
+    print(f"\n🔥 {len(leads)} leads uniques trouvés\n")
 
-    print(f"\n✅ {len(df)} entreprises uniques")
-    return df
+    # AFFICHAGE
+    for lead in leads:
+        print(f"👤 {lead['name']}")
+        print(f"🔗 {lead['link']}")
+        print(f"📝 {lead['bio']}")
+        print("-" * 50)
 
-# -------- SAVE --------
-def save(df):
-    if df.empty:
-        print("⚠️ Aucun lead")
-        return
+    # SAVE CSV
+    with open("leads.csv", "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["name", "link", "bio"])
+        writer.writeheader()
+        writer.writerows(leads)
 
-    if os.path.exists("companies.csv"):
-        df.to_csv("companies.csv", mode="a", header=False, index=False)
-    else:
-        df.to_csv("companies.csv", index=False)
+    print("\n✅ Leads sauvegardés dans leads.csv")
 
-    print("💾 companies.csv sauvegardé")
 
-# -------- LOOP --------
 if __name__ == "__main__":
-    print("🚀 Machine lead gen lancée (jobs)...")
-
-    while True:
-        try:
-            df = scrape_jobs()
-            save(df)
-
-            print("⏸️ Pause 1h...\n")
-            time.sleep(3600)
-
-        except Exception as e:
-            print("💥 Crash:", e)
-            time.sleep(60)
+    main()
