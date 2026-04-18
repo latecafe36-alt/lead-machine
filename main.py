@@ -1,83 +1,116 @@
 import requests
-import time
 import csv
+import time
+from datetime import datetime
+from config import SERPAPI_KEY, MIN_SCORE
 
-API_KEY = "TA_CLE_SERPAPI_ICI"
-
-QUERIES = [
-    'site:linkedin.com/in "founder startup"',
-    'site:linkedin.com/in "CEO startup"',
-    'site:linkedin.com/in "co-founder startup"',
-    'site:linkedin.com/in "entrepreneur startup"',
-    'site:linkedin.com/in "startup CEO"',
+queries = [
+    'site:linkedin.com/posts "raising funds" startup',
+    'site:linkedin.com/posts "looking for investors" startup',
+    'site:linkedin.com/posts "seed round" startup'
 ]
 
-def search_google(query):
-    url = "https://serpapi.com/search"
-    
-    params = {
-        "q": query,
-        "api_key": API_KEY,
-        "engine": "google",
-        "num": 20
-    }
+def extract_profile(url):
+    try:
+        return "https://www.linkedin.com/in/" + url.split("/posts/")[1].split("_")[0]
+    except:
+        return ""
 
-    response = requests.get(url, params=params)
-    data = response.json()
+def score(text):
+    t = text.lower()
+    s = 0
+    if "raising" in t: s += 3
+    if "investors" in t: s += 4
+    if "seed" in t or "series a" in t: s += 3
+    return s
 
-    results = []
+def generate_msg(snippet):
+    return f"""Hey,
 
-    if "organic_results" in data:
-        for result in data["organic_results"]:
-            link = result.get("link", "")
-            title = result.get("title", "")
-            snippet = result.get("snippet", "")
+I saw your post:
+"{snippet[:100]}..."
 
-            if "linkedin.com/in/" in link:
-                results.append({
-                    "name": title,
-                    "link": link,
-                    "bio": snippet
-                })
+Looks like you're raising.
 
-    return results
+Open to a quick chat?"""
 
+def load_existing():
+    try:
+        with open("db.csv", "r", encoding="utf-8") as f:
+            return set(row["profile"] for row in csv.DictReader(f))
+    except:
+        return set()
 
-def main():
-    all_leads = []
+def save(leads):
+    file_exists = False
+    try:
+        open("db.csv")
+        file_exists = True
+    except:
+        pass
 
-    print("🚀 Scraping lancé...\n")
+    with open("db.csv", "a", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["profile","post","score","message","date"])
+        if not file_exists:
+            writer.writeheader()
 
-    for query in QUERIES:
-        print(f"🔎 Query: {query}")
-        leads = search_google(query)
+        for l in leads:
+            writer.writerow(l)
 
-        print(f"👉 {len(leads)} résultats trouvés\n")
+def run():
+    existing = load_existing()
+    new_leads = []
 
-        all_leads.extend(leads)
-        time.sleep(2)
+    print("🚀 RUN START")
 
-    # SUPPRIMER DOUBLONS
-    unique = {lead["link"]: lead for lead in all_leads}
-    leads = list(unique.values())
+    for q in queries:
+        print("🔎", q)
 
-    print(f"\n🔥 {len(leads)} leads uniques trouvés\n")
+        for start in range(0, 30, 10):
+            params = {
+                "q": q,
+                "api_key": SERPAPI_KEY,
+                "start": start
+            }
 
-    # AFFICHAGE
-    for lead in leads:
-        print(f"👤 {lead['name']}")
-        print(f"🔗 {lead['link']}")
-        print(f"📝 {lead['bio']}")
-        print("-" * 50)
+            res = requests.get("https://serpapi.com/search", params=params).json()
 
-    # SAVE CSV
-    with open("leads.csv", "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["name", "link", "bio"])
-        writer.writeheader()
-        writer.writerows(leads)
+            for r in res.get("organic_results", []):
+                link = r.get("link", "")
+                snippet = r.get("snippet", "")
 
-    print("\n✅ Leads sauvegardés dans leads.csv")
+                if "linkedin.com/posts" not in link:
+                    continue
 
+                profile = extract_profile(link)
+
+                if not profile or profile in existing:
+                    continue
+
+                s = score(snippet)
+
+                if s < MIN_SCORE:
+                    continue
+
+                lead = {
+                    "profile": profile,
+                    "post": link,
+                    "score": s,
+                    "message": generate_msg(snippet),
+                    "date": datetime.today().strftime('%Y-%m-%d')
+                }
+
+                new_leads.append(lead)
+                existing.add(profile)
+
+            time.sleep(1)
+
+    save(new_leads)
+
+    print(f"🔥 {len(new_leads)} nouveaux leads ajoutés")
 
 if __name__ == "__main__":
-    main()
+    while True:
+        run()
+        print("⏸️ pause 3h...")
+        time.sleep(10800)
