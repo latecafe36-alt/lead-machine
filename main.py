@@ -10,14 +10,17 @@ SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 
 MAX_THREADS = 5
 
-# 🔥 QUERIES CORRIGÉES (SANS PAYS)
+# 🔥 QUERIES OPTIMISÉES (SANS GUILLEMETS)
 queries = [
-    'site:linkedin.com/in "founder startup"',
-    'site:linkedin.com/in "CEO startup"',
-    'site:linkedin.com/in "AI startup"',
-    'site:linkedin.com/in "SaaS founder"',
-    'site:linkedin.com/in "machine learning startup"',
+    'site:linkedin.com/in founder startup',
+    'site:linkedin.com/in ceo startup',
+    'site:linkedin.com/in ai startup founder',
+    'site:linkedin.com/in saas founder',
+    'site:linkedin.com/in entrepreneur startup',
 ]
+
+# 🌍 PAYS CIBLÉS
+TARGET_COUNTRIES = ["switzerland", "germany", "belgium", "portugal"]
 
 # -------- SAFE REQUEST --------
 def safe_request(url, params, retries=3):
@@ -39,16 +42,14 @@ def score_lead(snippet, name):
             score += 1
 
     if "founder" in name.lower() or "ceo" in name.lower():
-        score += 1
+        score += 2
 
     return score
 
 # -------- FILTRE PAYS --------
 def is_target_country(snippet):
     text = (snippet or "").lower()
-    return any(c in text for c in [
-        "switzerland", "germany", "belgium", "portugal"
-    ])
+    return any(c in text for c in TARGET_COUNTRIES)
 
 # -------- PROCESS LEAD --------
 def process_lead(r):
@@ -59,20 +60,20 @@ def process_lead(r):
     if not link or "linkedin.com/in" not in link:
         return None
 
-    # 🔥 filtre pays ici (PAS dans Google)
     if not is_target_country(snippet):
         return None
 
     score = score_lead(snippet, name)
 
-    if score < 1:
+    if score < 2:
         return None
 
     return {
         "name": name,
-        "link": link,
+        "linkedin": link,
         "snippet": snippet,
-        "score": score
+        "score": score,
+        "date": datetime.today().strftime('%Y-%m-%d')
     }
 
 # -------- SCRAPE --------
@@ -84,8 +85,11 @@ def scrape():
 
         params = {
             "q": query,
-            "num": 100,
-            "api_key": SERPAPI_KEY
+            "num": 50,
+            "api_key": SERPAPI_KEY,
+            "google_domain": "google.com",
+            "hl": "en",
+            "gl": "us"
         }
 
         data = safe_request("https://serpapi.com/search", params)
@@ -102,17 +106,17 @@ def scrape():
                     continue
 
                 print(f"👤 {lead['name']} | score: {lead['score']}")
+                results.append(lead)
 
-                results.append({
-                    "name": lead["name"],
-                    "linkedin": lead["link"],
-                    "snippet": lead["snippet"],
-                    "score": lead["score"],
-                    "date": datetime.today().strftime('%Y-%m-%d')
-                })
+    print(f"\n💾 {len(results)} leads avant déduplication")
 
-    print(f"\n💾 {len(results)} leads sauvegardés")
-    return pd.DataFrame(results)
+    # 🔥 SUPPRESSION DOUBLONS
+    df = pd.DataFrame(results)
+    if not df.empty:
+        df = df.drop_duplicates(subset=["linkedin"])
+
+    print(f"✅ {len(df)} leads uniques")
+    return df
 
 # -------- SAVE --------
 def save(df):
@@ -125,11 +129,11 @@ def save(df):
     else:
         df.to_csv("leads.csv", index=False)
 
-    print("✅ leads.csv mis à jour")
+    print("💾 leads.csv mis à jour")
 
 # -------- RUN LOOP --------
 if __name__ == "__main__":
-    print("🚀 Machine lancée en continu...")
+    print("🚀 Machine scraping lancée...")
 
     while True:
         df = scrape()
