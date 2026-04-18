@@ -1,96 +1,88 @@
 import os
 import psycopg2
 import requests
-from bs4 import BeautifulSoup
-import time
 
-# =========================
+# =====================
 # CONFIG
-# =========================
+# =====================
 DATABASE_URL = os.getenv("DATABASE_URL")
+SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 
-if not DATABASE_URL:
-    raise Exception("❌ DATABASE_URL manquante !")
-
-print("✅ Variables OK")
-
-# =========================
+# =====================
 # DB CONNECTION
-# =========================
+# =====================
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
 
+# =====================
+# CREATE TABLE
+# =====================
 cur.execute("""
 CREATE TABLE IF NOT EXISTS leads (
     id SERIAL PRIMARY KEY,
     name TEXT,
     title TEXT,
-    link TEXT UNIQUE,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-)
+    linkedin_url TEXT UNIQUE,
+    email TEXT
+);
 """)
-
 conn.commit()
 
-# =========================
-# SCRAPER (Google Search hack)
-# =========================
-QUERY = 'site:linkedin.com/in "CEO" "SaaS" "Paris" OR "Genève" "looking for investors"'
-
-def scrape_google():
-    headers = {
-        "User-Agent": "Mozilla/5.0"
+# =====================
+# SCRAPER GOOGLE (LinkedIn)
+# =====================
+def scrape_linkedin():
+    url = "https://serpapi.com/search"
+    
+    params = {
+        "engine": "google",
+        "q": 'site:linkedin.com/in "CEO" "SaaS" ("Paris" OR "Geneva") "looking for investors"',
+        "api_key": SERPAPI_KEY
     }
 
-    url = f"https://www.google.com/search?q={QUERY}&num=10"
-    res = requests.get(url, headers=headers)
+    res = requests.get(url, params=params)
+    data = res.json()
 
-    soup = BeautifulSoup(res.text, "html.parser")
+    leads = []
 
-    results = []
+    for result in data.get("organic_results", []):
+        title = result.get("title")
+        link = result.get("link")
 
-    for g in soup.select("div.g"):
-        link_tag = g.find("a")
-        title = g.find("h3")
-
-        if link_tag and title:
-            link = link_tag["href"]
-            name = title.text
-
-            results.append({
-                "name": name,
-                "title": "CEO / Founder",
-                "link": link
+        if "linkedin.com/in" in link:
+            leads.append({
+                "name": title,
+                "title": title,
+                "linkedin": link
             })
 
-    return results
+    return leads
 
-# =========================
+# =====================
 # SAVE TO DB
-# =========================
+# =====================
 def save_leads(leads):
     for lead in leads:
         try:
             cur.execute("""
-                INSERT INTO leads (name, title, link)
+                INSERT INTO leads (name, title, linkedin_url)
                 VALUES (%s, %s, %s)
-                ON CONFLICT (link) DO NOTHING
-            """, (lead["name"], lead["title"], lead["link"]))
-
+                ON CONFLICT (linkedin_url) DO NOTHING
+            """, (lead["name"], lead["title"], lead["linkedin"]))
         except Exception as e:
-            print("Erreur insertion:", e)
+            print("Error:", e)
 
     conn.commit()
 
-# =========================
-# LOOP
-# =========================
-while True:
+# =====================
+# MAIN
+# =====================
+if __name__ == "__main__":
     print("🚀 Scraping...")
-    leads = scrape_google()
-    print(f"✅ {len(leads)} leads trouvés")
+    leads = scrape_linkedin()
+
+    print(f"Found {len(leads)} leads")
 
     save_leads(leads)
 
-    print("💾 Sauvegardé en DB")
-    time.sleep(300)
+    print("✅ Done")
