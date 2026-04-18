@@ -48,9 +48,9 @@ def score_lead(snippet, name):
     if "ai" in text:
         score += 2
     if "funding" in text or "raising" in text:
-        score += 3
-    if "ceo" in name.lower() or "founder" in name.lower():
         score += 2
+    if "ceo" in name.lower() or "founder" in name.lower():
+        score += 1
 
     return score
 
@@ -137,10 +137,15 @@ def process_lead(r):
         snippet = r.get("snippet", "")
 
         score = score_lead(snippet, name)
-        if score < 4:
+
+        print(f"👤 Lead: {name} | score: {score}")
+
+        if score < 2:
             return None
 
         email, domain = find_email(name)
+
+        print(f"📧 Email trouvé: {email}")
 
         return {
             "name": name,
@@ -210,6 +215,7 @@ def scrape():
 def save(df):
     try:
         if df.empty:
+            print("⚠️ Aucun lead à sauvegarder")
             return
 
         if os.path.exists("leads.csv"):
@@ -217,7 +223,7 @@ def save(df):
         else:
             df.to_csv("leads.csv", index=False)
 
-        print("💾 Leads sauvegardés")
+        print(f"💾 {len(df)} leads sauvegardés")
 
     except Exception as e:
         print("❌ Save error:", e)
@@ -228,13 +234,13 @@ if __name__ == "__main__":
 
     while True:
         try:
-            print("🔄 Nouveau batch")
+            print("\n🔄 Nouveau batch\n")
 
             df = scrape()
             save(df)
 
-            print("✅ Batch terminé")
-            print("⏳ Pause 1h")
+            print("\n✅ Batch terminé")
+            print("⏳ Pause 1h\n")
 
             time.sleep(3600)
 
