@@ -10,25 +10,21 @@ SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 
 MAX_THREADS = 5
 
-# 🔥 QUERIES OPTIMISÉES (SANS GUILLEMETS)
+# 🔥 QUERIES INSTAGRAM
 queries = [
-    'site:linkedin.com/in founder startup',
-    'site:linkedin.com/in ceo startup',
-    'site:linkedin.com/in ai startup founder',
-    'site:linkedin.com/in saas founder',
-    'site:linkedin.com/in entrepreneur startup',
+    'site:instagram.com "founder startup"',
+    'site:instagram.com "ceo startup"',
+    'site:instagram.com "ai startup"',
+    'site:instagram.com "entrepreneur startup"',
+    'site:instagram.com "saas founder"',
 ]
-
-# 🌍 PAYS CIBLÉS
-TARGET_COUNTRIES = ["switzerland", "germany", "belgium", "portugal"]
 
 # -------- SAFE REQUEST --------
 def safe_request(url, params, retries=3):
     for _ in range(retries):
         try:
             return requests.get(url, params=params, timeout=10).json()
-        except Exception as e:
-            print(f"⚠️ Erreur requête: {e}")
+        except:
             time.sleep(random.randint(1, 3))
     return {}
 
@@ -37,41 +33,33 @@ def score_lead(snippet, name):
     text = (snippet or "").lower()
     score = 0
 
-    for k in ["ai", "machine learning", "startup", "saas"]:
+    for k in ["startup", "ai", "saas", "founder", "ceo"]:
         if k in text:
             score += 1
 
-    if "founder" in name.lower() or "ceo" in name.lower():
-        score += 2
-
     return score
 
-# -------- FILTRE PAYS --------
-def is_target_country(snippet):
-    text = (snippet or "").lower()
-    return any(c in text for c in TARGET_COUNTRIES)
-
-# -------- PROCESS LEAD --------
+# -------- PROCESS --------
 def process_lead(r):
     link = r.get("link", "")
-    name = r.get("title", "")
+    title = r.get("title", "")
     snippet = r.get("snippet", "")
 
-    if not link or "linkedin.com/in" not in link:
+    if "instagram.com" not in link:
         return None
 
-    if not is_target_country(snippet):
-        return None
+    if "/p/" in link or "/reel/" in link:
+        return None  # skip posts
 
-    score = score_lead(snippet, name)
+    score = score_lead(snippet, title)
 
     if score < 2:
         return None
 
     return {
-        "name": name,
-        "linkedin": link,
-        "snippet": snippet,
+        "name": title,
+        "instagram": link,
+        "bio": snippet,
         "score": score,
         "date": datetime.today().strftime('%Y-%m-%d')
     }
@@ -95,7 +83,7 @@ def scrape():
         data = safe_request("https://serpapi.com/search", params)
         leads = data.get("organic_results", [])
 
-        print(f"👉 {len(leads)} résultats trouvés")
+        print(f"👉 {len(leads)} résultats")
 
         with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
             futures = [executor.submit(process_lead, r) for r in leads]
@@ -105,35 +93,33 @@ def scrape():
                 if not lead:
                     continue
 
-                print(f"👤 {lead['name']} | score: {lead['score']}")
+                print(f"👤 {lead['name']}")
                 results.append(lead)
 
-    print(f"\n💾 {len(results)} leads avant déduplication")
-
-    # 🔥 SUPPRESSION DOUBLONS
     df = pd.DataFrame(results)
-    if not df.empty:
-        df = df.drop_duplicates(subset=["linkedin"])
 
-    print(f"✅ {len(df)} leads uniques")
+    if not df.empty:
+        df = df.drop_duplicates(subset=["instagram"])
+
+    print(f"\n✅ {len(df)} leads uniques")
     return df
 
 # -------- SAVE --------
 def save(df):
     if df.empty:
-        print("⚠️ Aucun lead à sauvegarder")
+        print("⚠️ Aucun lead")
         return
 
-    if os.path.exists("leads.csv"):
-        df.to_csv("leads.csv", mode="a", header=False, index=False)
+    if os.path.exists("insta_leads.csv"):
+        df.to_csv("insta_leads.csv", mode="a", header=False, index=False)
     else:
-        df.to_csv("leads.csv", index=False)
+        df.to_csv("insta_leads.csv", index=False)
 
-    print("💾 leads.csv mis à jour")
+    print("💾 insta_leads.csv sauvegardé")
 
-# -------- RUN LOOP --------
+# -------- LOOP --------
 if __name__ == "__main__":
-    print("🚀 Machine scraping lancée...")
+    print("🚀 Machine Instagram lancée...")
 
     while True:
         df = scrape()
