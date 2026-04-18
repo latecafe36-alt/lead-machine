@@ -1,35 +1,32 @@
 import requests
 import csv
 import time
+import os
 
-API_KEY = ""  # ← mets ta clé ici
+# 🔐 API KEY depuis Railway (OBLIGATOIRE)
+API_KEY = os.getenv("API_KEY")
 
-# 🌍 VILLES CIBLÉES
+if not API_KEY:
+    print("❌ ERREUR: API_KEY manquante !")
+    exit()
+
+print("✅ API KEY détectée")
+
+# 🌍 VILLES
 cities = [
-    # 🇨🇭 Suisse
-    "Zurich", "Geneva", "Lausanne", "Basel", "Bern", "Zug",
-    "Lucerne", "St Gallen", "Winterthur",
-
-    # 🇧🇪 Belgique
-    "Brussels", "Antwerp", "Ghent", "Liege",
-    "Charleroi", "Namur", "Leuven"
+    "Paris", "London", "Berlin", "Geneva", "Brussels"
 ]
 
-# 🔎 QUERIES ULTRA CIBLÉES (levée de fonds)
+# 🔎 QUERIES (moins strictes pour tester)
 base_queries = [
-    '"raising funds" startup',
-    '"looking for investors" startup',
-    '"seed round" startup',
-    '"pre-seed startup"',
-    '"series A startup"',
-    '"raising capital startup"',
-    '"we are raising startup"',
+    '"raising funds"',
+    '"looking for investors"',
     '"startup fundraising"',
-    '"looking for VC startup"',
-    '"angel investors startup"'
+    '"seed round"',
+    '"series A"'
 ]
 
-# 🧠 SCORING LEAD
+# 🧠 SCORE
 def score(text):
     t = text.lower()
     s = 0
@@ -59,32 +56,37 @@ seen_links = set()
 
 print("🚀 START SCRAPING...\n")
 
-# 🔁 LOOP QUERIES + VILLES
+# 🔁 LOOP
 for city in cities:
     for base in base_queries:
 
         query = f'site:linkedin.com/posts {base} "{city}"'
-        print(f"🔎 {query}")
+        print(f"\n🔎 QUERY: {query}")
 
-        # 🔁 MULTI-PAGES (100 résultats)
-        for start in range(0, 100, 10):
+        # ⚠️ TEST: seulement 2 pages (plus rapide)
+        for start in range(0, 20, 10):
 
             params = {
                 "engine": "google",
                 "q": query,
                 "api_key": API_KEY,
                 "start": start,
-                "num": 10,
-                "tbs": "qdr:d"  # 🔥 derniers 24h
+                "num": 10
+                # ❌ on enlève tbs au début
             }
 
             try:
                 response = requests.get("https://serpapi.com/search", params=params)
                 data = response.json()
 
+                # 🔥 DEBUG
+                if "error" in data:
+                    print("❌ SERPAPI ERROR:", data["error"])
+                    continue
+
                 results = data.get("organic_results", [])
 
-                print(f"👉 {len(results)} résultats (page {start//10 + 1})")
+                print(f"👉 {len(results)} résultats")
 
                 for r in results:
                     link = r.get("link", "")
@@ -94,8 +96,8 @@ for city in cities:
                     text = title + " " + snippet
                     s = score(text)
 
-                    # 🎯 filtre qualité
-                    if link not in seen_links and s >= 5:
+                    # 🎯 filtre
+                    if link not in seen_links and s >= 3:
                         seen_links.add(link)
 
                         leads.append({
@@ -107,11 +109,11 @@ for city in cities:
                         })
 
             except Exception as e:
-                print("❌ erreur :", e)
+                print("❌ ERREUR:", e)
 
-            time.sleep(1)  # anti-ban
+            time.sleep(1)
 
-# 💾 SAVE CSV
+# 💾 SAVE
 with open("leads.csv", "w", newline="", encoding="utf-8") as f:
     writer = csv.DictWriter(f, fieldnames=["title", "link", "snippet", "score", "city"])
     writer.writeheader()
