@@ -4,104 +4,73 @@ from datetime import datetime
 import os
 import time
 import random
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 
-MAX_THREADS = 5
-
-# 🔥 QUERIES INSTAGRAM
+# 🔥 QUERIES QUI DONNENT DES RÉSULTATS
 queries = [
-    'site:instagram.com "founder startup"',
-    'site:instagram.com "ceo startup"',
-    'site:instagram.com "ai startup"',
-    'site:instagram.com "entrepreneur startup"',
-    'site:instagram.com "saas founder"',
+    "AI startup hiring",
+    "SaaS startup hiring",
+    "machine learning startup hiring",
+    "tech startup hiring Europe",
+    "startup hiring engineer"
 ]
 
 # -------- SAFE REQUEST --------
-def safe_request(url, params, retries=3):
+def safe_request(params, retries=3):
     for _ in range(retries):
         try:
-            return requests.get(url, params=params, timeout=10).json()
-        except:
+            res = requests.get("https://serpapi.com/search", params=params, timeout=15)
+            return res.json()
+        except Exception as e:
+            print("⚠️ Request error:", e)
             time.sleep(random.randint(1, 3))
     return {}
 
-# -------- SCORE --------
-def score_lead(snippet, name):
-    text = (snippet or "").lower()
-    score = 0
-
-    for k in ["startup", "ai", "saas", "founder", "ceo"]:
-        if k in text:
-            score += 1
-
-    return score
-
-# -------- PROCESS --------
-def process_lead(r):
-    link = r.get("link", "")
-    title = r.get("title", "")
-    snippet = r.get("snippet", "")
-
-    if "instagram.com" not in link:
-        return None
-
-    if "/p/" in link or "/reel/" in link:
-        return None  # skip posts
-
-    score = score_lead(snippet, title)
-
-    if score < 2:
-        return None
-
-    return {
-        "name": title,
-        "instagram": link,
-        "bio": snippet,
-        "score": score,
-        "date": datetime.today().strftime('%Y-%m-%d')
-    }
-
-# -------- SCRAPE --------
-def scrape():
+# -------- SCRAPE JOBS --------
+def scrape_jobs():
     results = []
 
     for query in queries:
         print(f"\n🔎 Query: {query}")
 
         params = {
+            "engine": "google_jobs",
             "q": query,
-            "num": 50,
-            "api_key": SERPAPI_KEY,
-            "google_domain": "google.com",
-            "hl": "en",
-            "gl": "us"
+            "api_key": SERPAPI_KEY
         }
 
-        data = safe_request("https://serpapi.com/search", params)
-        leads = data.get("organic_results", [])
+        data = safe_request(params)
 
-        print(f"👉 {len(leads)} résultats")
+        jobs = data.get("jobs_results", [])
 
-        with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
-            futures = [executor.submit(process_lead, r) for r in leads]
+        print(f"👉 {len(jobs)} jobs trouvés")
 
-            for future in as_completed(futures):
-                lead = future.result()
-                if not lead:
-                    continue
+        for job in jobs:
+            company = job.get("company_name", "")
+            title = job.get("title", "")
+            location = job.get("location", "")
+            via = job.get("via", "")
 
-                print(f"👤 {lead['name']}")
-                results.append(lead)
+            if not company:
+                continue
+
+            print(f"🏢 {company} | {title}")
+
+            results.append({
+                "company": company,
+                "job_title": title,
+                "location": location,
+                "source": via,
+                "date": datetime.today().strftime('%Y-%m-%d')
+            })
 
     df = pd.DataFrame(results)
 
     if not df.empty:
-        df = df.drop_duplicates(subset=["instagram"])
+        df = df.drop_duplicates(subset=["company"])
 
-    print(f"\n✅ {len(df)} leads uniques")
+    print(f"\n✅ {len(df)} entreprises uniques")
     return df
 
 # -------- SAVE --------
@@ -110,20 +79,25 @@ def save(df):
         print("⚠️ Aucun lead")
         return
 
-    if os.path.exists("insta_leads.csv"):
-        df.to_csv("insta_leads.csv", mode="a", header=False, index=False)
+    if os.path.exists("companies.csv"):
+        df.to_csv("companies.csv", mode="a", header=False, index=False)
     else:
-        df.to_csv("insta_leads.csv", index=False)
+        df.to_csv("companies.csv", index=False)
 
-    print("💾 insta_leads.csv sauvegardé")
+    print("💾 companies.csv sauvegardé")
 
 # -------- LOOP --------
 if __name__ == "__main__":
-    print("🚀 Machine Instagram lancée...")
+    print("🚀 Machine lead gen lancée (jobs)...")
 
     while True:
-        df = scrape()
-        save(df)
+        try:
+            df = scrape_jobs()
+            save(df)
 
-        print("⏸️ Pause 1h...\n")
-        time.sleep(3600)
+            print("⏸️ Pause 1h...\n")
+            time.sleep(3600)
+
+        except Exception as e:
+            print("💥 Crash:", e)
+            time.sleep(60)
