@@ -1,123 +1,85 @@
-import requests
-import csv
-import time
 import os
+import requests
+import psycopg2
 
-# 🔐 API KEY depuis Railway (OBLIGATOIRE)
-API_KEY = os.getenv("API_KEY")
+# ===== CONFIG =====
+API_KEY = os.getenv("SERPAPI_KEY")
+DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not API_KEY:
-    print("❌ ERREUR: API_KEY manquante !")
-    exit()
+    raise Exception("❌ SERPAPI_KEY manquante !")
 
-print("✅ API KEY détectée")
+if not DATABASE_URL:
+    raise Exception("❌ DATABASE_URL manquante !")
 
-# 🌍 VILLES
-cities = [
-    "Paris", "London", "Berlin", "Geneva", "Brussels"
-]
+# ===== DB CONNECTION =====
+conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+cur = conn.cursor()
 
-# 🔎 QUERIES (moins strictes pour tester)
-base_queries = [
-    '"raising funds"',
-    '"looking for investors"',
-    '"startup fundraising"',
-    '"seed round"',
-    '"series A"'
-]
+cur.execute("""
+CREATE TABLE IF NOT EXISTS leads (
+    id SERIAL PRIMARY KEY,
+    title TEXT,
+    link TEXT UNIQUE
+)
+""")
+conn.commit()
 
-# 🧠 SCORE
-def score(text):
-    t = text.lower()
-    s = 0
+# ===== SAVE FUNCTION =====
+def save_lead(title, link):
+    try:
+        cur.execute("""
+            INSERT INTO leads (title, link)
+            VALUES (%s, %s)
+            ON CONFLICT (link) DO NOTHING
+        """, (title, link))
+        conn.commit()
+        print(f"✅ Saved: {title}")
+    except Exception as e:
+        print("❌ DB ERROR:", e)
 
-    keywords = {
-        "raising": 3,
-        "funding": 3,
-        "investors": 4,
-        "seed": 3,
-        "series a": 4,
-        "pre-seed": 3,
-        "capital": 2,
-        "vc": 3,
-        "angel": 3
+# ===== SEARCH QUERY =====
+query = 'site:linkedin.com/in "CEO" "SaaS" ("Paris" OR "Genève")'
+
+print("🚀 START SCRAPING...")
+print("🔎 Query:", query)
+
+# ===== LOOP PAGES =====
+for start in range(0, 20, 10):
+    params = {
+        "engine": "google",
+        "q": query,
+        "api_key": API_KEY,
+        "start": start,
+        "num": 10
     }
 
-    for k, v in keywords.items():
-        if k in t:
-            s += v
+    try:
+        response = requests.get("https://serpapi.com/search", params=params)
+        data = response.json()
 
-    return s
+        if "error" in data:
+            print("❌ SERPAPI ERROR:", data["error"])
+            continue
 
+        results = data.get("organic_results", [])
 
-# 📊 STOCKAGE
-leads = []
-seen_links = set()
+        print(f"👉 {len(results)} résultats page {start}")
 
-print("🚀 START SCRAPING...\n")
+        for r in results:
+            title = r.get("title")
+            link = r.get("link")
 
-# 🔁 LOOP
-for city in cities:
-    for base in base_queries:
+            if not link:
+                continue
 
-        query = f'site:linkedin.com/posts {base} "{city}"'
-        print(f"\n🔎 QUERY: {query}")
+            print("➡️", title)
+            save_lead(title, link)
 
-        # ⚠️ TEST: seulement 2 pages (plus rapide)
-        for start in range(0, 20, 10):
+    except Exception as e:
+        print("❌ REQUEST ERROR:", e)
 
-            params = {
-                "engine": "google",
-                "q": query,
-                "api_key": API_KEY,
-                "start": start,
-                "num": 10
-                # ❌ on enlève tbs au début
-            }
+cur.close()
+conn.close()
 
-            try:
-                response = requests.get("https://serpapi.com/search", params=params)
-                data = response.json()
-
-                # 🔥 DEBUG
-                if "error" in data:
-                    print("❌ SERPAPI ERROR:", data["error"])
-                    continue
-
-                results = data.get("organic_results", [])
-
-                print(f"👉 {len(results)} résultats")
-
-                for r in results:
-                    link = r.get("link", "")
-                    title = r.get("title", "")
-                    snippet = r.get("snippet", "")
-
-                    text = title + " " + snippet
-                    s = score(text)
-
-                    # 🎯 filtre
-                    if link not in seen_links and s >= 3:
-                        seen_links.add(link)
-
-                        leads.append({
-                            "title": title,
-                            "link": link,
-                            "snippet": snippet,
-                            "score": s,
-                            "city": city
-                        })
-
-            except Exception as e:
-                print("❌ ERREUR:", e)
-
-            time.sleep(1)
-
-# 💾 SAVE
-with open("leads.csv", "w", newline="", encoding="utf-8") as f:
-    writer = csv.DictWriter(f, fieldnames=["title", "link", "snippet", "score", "city"])
-    writer.writeheader()
-    writer.writerows(leads)
-
-print(f"\n🔥 {len(leads)} LEADS TROUVÉS")
-print("✅ Sauvegardé dans leads.csv")
+print("✅ FINISHED")
