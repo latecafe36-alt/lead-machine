@@ -2,21 +2,12 @@ import os
 import psycopg2
 import requests
 
-# =====================
-# CONFIG
-# =====================
 DATABASE_URL = os.getenv("DATABASE_URL")
 SERPAPI_KEY = os.getenv("SERPAPI_KEY")
 
-# =====================
-# DB CONNECTION
-# =====================
 conn = psycopg2.connect(DATABASE_URL)
 cur = conn.cursor()
 
-# =====================
-# CREATE TABLE
-# =====================
 cur.execute("""
 CREATE TABLE IF NOT EXISTS leads (
     id SERIAL PRIMARY KEY,
@@ -28,39 +19,42 @@ CREATE TABLE IF NOT EXISTS leads (
 """)
 conn.commit()
 
-# =====================
-# SCRAPER GOOGLE (LinkedIn)
-# =====================
 def scrape_linkedin():
     url = "https://serpapi.com/search"
-    
-    params = {
-        "engine": "google",
-        "q": 'site:linkedin.com/in "CEO" "SaaS" ("Paris" OR "Geneva") "looking for investors"',
-        "api_key": SERPAPI_KEY
-    }
 
-    res = requests.get(url, params=params)
-    data = res.json()
+    queries = [
+        'site:linkedin.com/in "CEO" "startup" "Paris"',
+        'site:linkedin.com/in "Founder" "SaaS" "Geneva"',
+        'site:linkedin.com/in "co-founder" "AI startup"',
+    ]
 
     leads = []
 
-    for result in data.get("organic_results", []):
-        title = result.get("title")
-        link = result.get("link")
+    for q in queries:
+        params = {
+            "engine": "google",
+            "q": q,
+            "api_key": SERPAPI_KEY,
+            "num": 20
+        }
 
-        if "linkedin.com/in" in link:
-            leads.append({
-                "name": title,
-                "title": title,
-                "linkedin": link
-            })
+        res = requests.get(url, params=params)
+        data = res.json()
+
+        for result in data.get("organic_results", []):
+            link = result.get("link")
+            title = result.get("title")
+
+            if link and "linkedin.com/in" in link:
+                leads.append({
+                    "name": title,
+                    "title": title,
+                    "linkedin": link
+                })
 
     return leads
 
-# =====================
-# SAVE TO DB
-# =====================
+
 def save_leads(leads):
     for lead in leads:
         try:
@@ -74,9 +68,7 @@ def save_leads(leads):
 
     conn.commit()
 
-# =====================
-# MAIN
-# =====================
+
 if __name__ == "__main__":
     print("🚀 Scraping...")
     leads = scrape_linkedin()
